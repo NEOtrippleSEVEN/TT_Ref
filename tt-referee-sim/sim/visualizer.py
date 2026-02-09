@@ -52,7 +52,10 @@ def _world_to_top(pos, tx, ty, tw, th):
 def _world_to_side(pos, tx, t_surf, tw):
     """Convert world coordinates to side-view screen position."""
     x = tx + (pos.x + table.TABLE_LENGTH / 2) / table.TABLE_LENGTH * tw
-    y = t_surf - (pos.z - 0) / table.TABLE_LENGTH * tw
+    # Height relative to table surface, not ground — keeps ball near the drawn table
+    height_above_table = pos.z - table.TABLE_HEIGHT
+    pix_per_meter = tw / table.TABLE_LENGTH
+    y = t_surf - height_above_table * pix_per_meter
     return int(x), int(y)
 
 

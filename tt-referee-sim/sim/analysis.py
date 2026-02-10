@@ -1,4 +1,6 @@
-"""Matplotlib analysis charts — FPS comparison, detection heatmaps, cost vs accuracy."""
+"""Matplotlib analysis charts — FPS comparison, detection heatmaps, cost vs accuracy, game stats."""
+
+import random
 
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend
@@ -8,6 +10,8 @@ import numpy as np
 from engine.physics import simulate
 from engine.camera import compare_cameras, CAMERA_PRESETS
 from engine.trajectories import get_shot, SHOT_PRESETS
+from engine.ai_player import AIPlayer, PLAYSTYLES
+from engine.game import simulate_game
 from engine import table
 
 
@@ -181,11 +185,137 @@ def chart_cost_vs_accuracy(save_path=None):
             xytext=(12, -5), textcoords="offset points",
         )
 
-    ax.set_xlabel("Cost (€)")
+    ax.set_xlabel("Cost (EUR)")
     ax.set_ylabel("Detection Rate (%)")
     ax.set_ylim(0, 105)
     ax.set_xlim(0, 100)
     ax.grid(True, alpha=0.15)
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, facecolor=fig.get_facecolor())
+    return fig
+
+
+def chart_matchup_heatmap(n_games=5, save_path=None):
+    """Chart 5: Playstyle Matchup Heatmap.
+
+    Grid showing win rates of each playstyle vs every other.
+    """
+    style_keys = list(PLAYSTYLES.keys())
+    n = len(style_keys)
+    win_matrix = np.zeros((n, n))
+
+    for i, s1 in enumerate(style_keys):
+        for j, s2 in enumerate(style_keys):
+            if i == j:
+                win_matrix[i][j] = 50.0
+                continue
+            wins = 0
+            for seed in range(n_games):
+                random.seed(seed * 100 + i * 10 + j)
+                p1 = AIPlayer("P1", s1, 1)
+                p2 = AIPlayer("P2", s2, 2)
+                result = simulate_game(p1, p2)
+                if result.match.winner == 1:
+                    wins += 1
+            win_matrix[i][j] = wins / n_games * 100
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    fig.set_facecolor("#0f0f1a")
+    _style_chart(ax, "Playstyle Matchup Win Rates (P1 vs P2)")
+
+    labels = [PLAYSTYLES[k]["label"] for k in style_keys]
+    im = ax.imshow(win_matrix, cmap="RdYlGn", vmin=0, vmax=100, aspect="auto")
+
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel("P2 Style")
+    ax.set_ylabel("P1 Style")
+
+    for i in range(n):
+        for j in range(n):
+            val = win_matrix[i][j]
+            color = "white" if val < 30 or val > 70 else "black"
+            ax.text(j, i, f"{val:.0f}%", ha="center", va="center",
+                    fontsize=10, fontweight="bold", color=color)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("P1 Win Rate %", color="#aaa")
+    cbar.ax.tick_params(colors="#888")
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, facecolor=fig.get_facecolor())
+    return fig
+
+
+def chart_rally_length_distribution(n_games=3, save_path=None):
+    """Chart 6: Rally Length Distribution across different matchups."""
+    matchups = [
+        ("aggressive", "defensive", "#e94560"),
+        ("pro", "pro", "#28a745"),
+        ("beginner", "beginner", "#ffc107"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    fig.set_facecolor("#0f0f1a")
+    _style_chart(ax, "Rally Length Distribution by Matchup")
+
+    for s1, s2, color in matchups:
+        all_lengths = []
+        for seed in range(n_games):
+            random.seed(seed * 50)
+            p1 = AIPlayer("P1", s1, 1)
+            p2 = AIPlayer("P2", s2, 2)
+            result = simulate_game(p1, p2)
+            all_lengths.extend(r.rally_length for r in result.rallies)
+
+        label = f"{PLAYSTYLES[s1]['label']} vs {PLAYSTYLES[s2]['label']}"
+        bins = range(1, max(all_lengths) + 2) if all_lengths else range(1, 10)
+        ax.hist(all_lengths, bins=bins, alpha=0.6, color=color, label=label, edgecolor=color)
+
+    ax.set_xlabel("Rally Length (shots)")
+    ax.set_ylabel("Frequency")
+    ax.legend(facecolor="#1a1a2e", edgecolor="#333", labelcolor="#e0e0e0", fontsize=9)
+    ax.grid(True, alpha=0.15, axis="y")
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, facecolor=fig.get_facecolor())
+    return fig
+
+
+def chart_point_reasons(n_games=3, save_path=None):
+    """Chart 7: How points are won — breakdown by reason."""
+    all_reasons = {}
+    for seed in range(n_games):
+        random.seed(seed * 77)
+        p1 = AIPlayer("P1", "allround", 1)
+        p2 = AIPlayer("P2", "allround", 2)
+        result = simulate_game(p1, p2)
+        for r in result.rallies:
+            all_reasons[r.reason] = all_reasons.get(r.reason, 0) + 1
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    fig.set_facecolor("#0f0f1a")
+    _style_chart(ax, "How Points Are Won")
+
+    reasons = sorted(all_reasons.items(), key=lambda x: -x[1])
+    labels = [r[0] for r in reasons]
+    counts = [r[1] for r in reasons]
+    colors = ["#e94560", "#28a745", "#ffc107", "#4ecdc4", "#a855f7", "#64748b", "#fb923c"]
+
+    bars = ax.barh(labels, counts, color=colors[:len(labels)], edgecolor="#333", alpha=0.85)
+    for bar, count in zip(bars, counts):
+        ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
+                str(count), va="center", fontsize=10, color="#e0e0e0")
+
+    ax.set_xlabel("Count")
+    ax.invert_yaxis()
+    ax.grid(True, alpha=0.15, axis="x")
 
     plt.tight_layout()
     if save_path:
@@ -217,6 +347,24 @@ def generate_all_charts(output_dir="."):
 
     path = os.path.join(output_dir, "chart_cost_vs_accuracy.png")
     chart_cost_vs_accuracy(save_path=path)
+    paths.append(path)
+    print(f"  Saved: {path}")
+
+    path = os.path.join(output_dir, "chart_matchup_heatmap.png")
+    print("  Generating matchup heatmap (running AI games)...")
+    chart_matchup_heatmap(n_games=3, save_path=path)
+    paths.append(path)
+    print(f"  Saved: {path}")
+
+    path = os.path.join(output_dir, "chart_rally_distribution.png")
+    print("  Generating rally distribution...")
+    chart_rally_length_distribution(n_games=3, save_path=path)
+    paths.append(path)
+    print(f"  Saved: {path}")
+
+    path = os.path.join(output_dir, "chart_point_reasons.png")
+    print("  Generating point reasons chart...")
+    chart_point_reasons(n_games=3, save_path=path)
     paths.append(path)
     print(f"  Saved: {path}")
 

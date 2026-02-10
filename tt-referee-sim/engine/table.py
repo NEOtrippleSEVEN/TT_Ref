@@ -26,6 +26,7 @@ AIR_DENSITY = 1.225  # kg/m^3
 
 # Magnus effect lift coefficient
 MAGNUS_CL = 0.5
+MAGNUS_BOOST = 3.0  # Moderate amplification so spin visibly affects trajectories
 
 # Collision thresholds
 EDGE_THRESHOLD = 0.03  # 3cm from edge = edge hit

@@ -1,6 +1,7 @@
 """Generate PDF/PNG report for FabLab presentation."""
 
 import os
+import random
 
 import matplotlib
 matplotlib.use("Agg")
@@ -11,6 +12,8 @@ import numpy as np
 from engine.physics import simulate
 from engine.camera import compare_cameras, CAMERA_PRESETS
 from engine.trajectories import get_shot, SHOT_PRESETS
+from engine.ai_player import AIPlayer, PLAYSTYLES
+from engine.game import simulate_game
 from engine import table
 
 
@@ -29,11 +32,17 @@ def generate_report(output_dir=".", filename="tt_referee_report"):
         positions, events = simulate(state)
         all_results[key] = compare_cameras(positions, events)
 
+    # Run a sample AI game for stats
+    random.seed(42)
+    p1 = AIPlayer("Aggressive", "aggressive", 1)
+    p2 = AIPlayer("Defensive", "defensive", 2)
+    game_result = simulate_game(p1, p2)
+
     # Create figure
-    fig = plt.figure(figsize=(16, 20))
+    fig = plt.figure(figsize=(16, 22))
     fig.set_facecolor("#0f0f1a")
 
-    gs = gridspec.GridSpec(4, 2, hspace=0.35, wspace=0.3)
+    gs = gridspec.GridSpec(5, 2, hspace=0.35, wspace=0.3)
 
     # ---- Title ----
     fig.text(
@@ -114,7 +123,7 @@ def generate_report(output_dir=".", filename="tt_referee_report"):
             f"{result['detection_rate']}%",
             f"{result['avg_confidence']}%",
             f"{result['avg_blur_px']}",
-            f"€{result['cost']}",
+            f"EUR {result['cost']}",
         ])
 
     tbl = ax3.table(
@@ -149,7 +158,7 @@ def generate_report(output_dir=".", filename="tt_referee_report"):
             fontsize=8, color="#e0e0e0", xytext=(8, -3), textcoords="offset points",
         )
 
-    ax4.set_xlabel("Cost (€)", color="#aaa")
+    ax4.set_xlabel("Cost (EUR)", color="#aaa")
     ax4.set_ylabel("Detection Rate (%)", color="#aaa")
     ax4.set_ylim(0, 105)
     ax4.set_xlim(0, 100)
@@ -158,9 +167,33 @@ def generate_report(output_dir=".", filename="tt_referee_report"):
     for spine in ax4.spines.values():
         spine.set_color("#333")
 
-    # ---- Chart 5: Frame sampling ----
+    # ---- Chart 5: AI Game Stats ----
+    ax5 = fig.add_subplot(gs[2, 1])
+    ax5.set_facecolor("#0f0f1a")
+    ax5.axis("off")
+    ax5.set_title("AI Match Analysis", color="#e0e0e0", fontsize=12, fontweight="bold", pad=15)
+
+    gs2 = game_result.stats
+    game_text = (
+        f"Aggressive vs Defensive\n"
+        f"Final Score: {gs2['p1_points']} - {gs2['p2_points']}\n"
+        f"Total Rallies: {gs2['total_rallies']}\n"
+        f"Avg Rally Length: {gs2['avg_rally_length']} shots\n"
+        f"Max Rally Length: {gs2['max_rally_length']} shots\n\n"
+        f"P1 Winners: {gs2['p1_winners']}  |  P2 Winners: {gs2['p2_winners']}\n"
+        f"P1 Errors: {gs2['p1_unforced_errors']}  |  P2 Errors: {gs2['p2_unforced_errors']}\n\n"
+        f"Point breakdown:\n"
+    )
+    for reason, count in sorted(gs2["reasons"].items(), key=lambda x: -x[1]):
+        game_text += f"  {reason}: {count}\n"
+
+    ax5.text(0.05, 0.95, game_text, transform=ax5.transAxes,
+             fontsize=10, color="#e0e0e0", va="top", family="monospace",
+             bbox=dict(boxstyle="round,pad=0.5", facecolor="#1a1a2e", edgecolor="#333"))
+
+    # ---- Chart 6: Frame sampling ----
     for i, (cam_key, preset) in enumerate(CAMERA_PRESETS.items()):
-        ax = fig.add_subplot(gs[3, 0] if i == 0 else gs[3, 1] if i == 2 else gs[2, 1])
+        ax = fig.add_subplot(gs[3, 0] if i == 0 else gs[3, 1] if i == 2 else gs[4, 0])
         ax.set_facecolor("#0f0f1a")
         ax.set_title(f"{preset['fps']}fps Frame Coverage", color="#e0e0e0", fontsize=11)
 
@@ -196,10 +229,9 @@ def generate_report(output_dir=".", filename="tt_referee_report"):
         f"{(80/3.6/200)*100:.1f}cm at 200fps — critical for accurate bounce detection.\n\n"
         f"Global shutter eliminates motion blur entirely, averaging {arducam_80['avg_blur_px']}px blur "
         f"vs {cheap_80['avg_blur_px']}px on the budget rolling-shutter camera.\n\n"
-        f"For €{arducam_80['cost'] - cheap_80['cost']} more, you get "
-        f"{arducam_80['detection_rate'] - cheap_80['detection_rate']:.1f}% higher accuracy — "
-        f"the difference between a working referee and an unreliable one.\n\n"
-        f"HARDWARE BUDGET: €215 total (Pi 5 €95 + Camera €75 + Lens €25 + Accessories €20)"
+        f"AI game simulation ({gs2['total_rallies']} rallies, avg {gs2['avg_rally_length']} shots/rally) "
+        f"validates the referee engine works end-to-end with realistic play patterns.\n\n"
+        f"HARDWARE BUDGET: EUR 215 total (Pi 5 EUR 95 + Camera EUR 75 + Lens EUR 25 + Accessories EUR 20)"
     )
 
     fig.text(

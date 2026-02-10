@@ -5,7 +5,7 @@ from engine import table
 
 # All shots start from the left side of the table
 _START_X = -table.TABLE_LENGTH / 2 + 0.3
-_START_Z = table.TABLE_HEIGHT + 0.15
+_START_Z = table.TABLE_HEIGHT + 0.40  # ~40cm above table, realistic for waist-height hit
 
 SHOT_PRESETS = {
     "slow_rally": {
@@ -13,56 +13,56 @@ SHOT_PRESETS = {
         "speed": 30,
         "vx": 8.3,
         "vy": 0.2,
-        "vz": 1.2,
-        "spin": (0, 0, 0),
+        "vz": -0.5,
+        "spin": (0, 5, 0),
     },
     "medium_rally": {
         "label": "Medium Rally (~50 km/h)",
         "speed": 50,
         "vx": 13.5,
         "vy": 0.3,
-        "vz": 1.8,
-        "spin": (20, 0, 0),
+        "vz": -1.0,
+        "spin": (0, 30, 0),  # topspin around y-axis dips the ball
     },
     "fast_topspin": {
         "label": "Fast Topspin (~80 km/h)",
         "speed": 80,
         "vx": 21,
-        "vy": 0.5,
-        "vz": 2.5,
-        "spin": (50, 0, 0),
+        "vy": 0.4,
+        "vz": -1.5,
+        "spin": (0, 55, 0),  # heavy topspin — strong downward dip
     },
     "smash": {
         "label": "Smash (~100 km/h)",
         "speed": 100,
         "vx": 27,
-        "vy": 0.3,
-        "vz": 1.5,
-        "spin": (10, 0, 0),
+        "vy": 0.2,
+        "vz": -3.5,
+        "spin": (0, 20, 0),
     },
     "net_clip": {
         "label": "Net Clip",
         "speed": 35,
         "vx": 9.5,
         "vy": 0.1,
-        "vz": 0.45,
-        "spin": (5, 0, 0),
+        "vz": -0.7,
+        "spin": (0, 5, 0),  # barely clears net
     },
     "edge_hit": {
         "label": "Edge Hit",
         "speed": 45,
         "vx": 12,
-        "vy": 3.8,
-        "vz": 1.0,
-        "spin": (0, 10, 0),
+        "vy": 2.0,
+        "vz": -0.8,
+        "spin": (15, 10, 0),  # sidespin + topspin
     },
     "backspin_chop": {
         "label": "Backspin Chop",
         "speed": 36,
         "vx": 10,
         "vy": 0.2,
-        "vz": 2.0,
-        "spin": (-30, 0, 0),
+        "vz": -0.8,
+        "spin": (0, -10, 0),  # backspin lifts slightly, floats longer
     },
 }
 

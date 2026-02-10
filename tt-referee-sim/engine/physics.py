@@ -41,7 +41,7 @@ def _apply_magnus(vel: Vec3, spin: Vec3, dt: float) -> Vec3:
         return vel.copy()
     # Force magnitude: (4/3) * pi * r^3 * rho * Cl * |omega x v|
     volume_factor = (4.0 / 3.0) * math.pi * table.BALL_RADIUS**3
-    force = volume_factor * table.AIR_DENSITY * table.MAGNUS_CL * cross_mag
+    force = volume_factor * table.AIR_DENSITY * table.MAGNUS_CL * cross_mag * table.MAGNUS_BOOST
     accel = force / table.BALL_MASS
     return Vec3(
         vel.x + (cross.x / cross_mag) * accel * dt,
@@ -100,18 +100,22 @@ def _check_net_collision(
     half_w = table.TABLE_WIDTH / 2 + table.NET_OVERHANG
     net_top = table.TABLE_HEIGHT + table.NET_HEIGHT + table.BALL_RADIUS
 
-    if prev.pos.x < 0 and curr.pos.x >= 0:
-        if abs(curr.pos.y) <= half_w:
-            if curr.pos.z >= table.TABLE_HEIGHT + table.BALL_RADIUS and curr.pos.z < net_top:
-                # Ball clips top of net
-                curr.vel.x *= 0.3
-                curr.vel.z += 0.5
-                events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=True))
-            elif curr.pos.z < table.TABLE_HEIGHT + table.BALL_RADIUS:
-                # Ball hits net body — reflect with heavy loss
-                curr.vel.x = -curr.vel.x * 0.2
-                curr.vel.z = abs(curr.vel.z) * 0.3
-                events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=False))
+    # Detect crossing in either direction (left→right or right→left)
+    crossed = (prev.pos.x < 0 and curr.pos.x >= 0) or (prev.pos.x > 0 and curr.pos.x <= 0)
+    if not crossed:
+        return curr, events
+
+    if abs(curr.pos.y) <= half_w:
+        if table.TABLE_HEIGHT + table.BALL_RADIUS <= curr.pos.z < net_top:
+            # Ball clips top of net
+            curr.vel.x *= 0.3
+            curr.vel.z = abs(curr.vel.z) * 0.4
+            events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=True))
+        elif curr.pos.z < table.TABLE_HEIGHT + table.BALL_RADIUS:
+            # Ball hits net body — reflect with heavy loss
+            curr.vel.x = -curr.vel.x * 0.15
+            curr.vel.z = abs(curr.vel.z) * 0.2
+            events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=False))
 
     return curr, events
 
@@ -149,7 +153,7 @@ def _check_out_of_bounds(
 def simulate(
     initial_state: BallState,
     dt: float = 0.001,
-    max_time: float = 3.0,
+    max_time: float = 5.0,
 ) -> tuple[list[BallState], list[Union[BounceEvent, NetEvent, OutEvent]]]:
     """Run full physics simulation from initial state.
 
@@ -159,7 +163,7 @@ def simulate(
     state = initial_state.copy()
     positions = [state.copy()]
     all_events: list[Union[BounceEvent, NetEvent, OutEvent]] = []
-    max_bounces = 4
+    max_bounces = 10
 
     bounce_count = 0
     steps = int(max_time / dt)

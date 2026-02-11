@@ -1,4 +1,11 @@
-"""AI player engine — two players with different playstyles for simulated matches."""
+"""AI player engine — two players with different playstyles for simulated matches.
+
+Spin values use real rad/s units:
+  - Beginner: 50-200 rad/s
+  - Intermediate: 200-400 rad/s
+  - Pro: 400-700 rad/s
+  - Elite: 600-900 rad/s
+"""
 
 import random
 import math
@@ -56,6 +63,24 @@ PLAYSTYLES = {
     },
 }
 
+# Speed and trajectory parameters for each shot type (base_vx, base_vz_down)
+_SHOT_PARAMS = {
+    "slow_rally":     (8, 0.5),
+    "medium_rally":   (13, 1.0),
+    "fast_topspin":   (20, 2.0),
+    "smash":          (26, 3.5),
+    "backspin_chop":  (8, 0.8),
+}
+
+# Spin ranges in rad/s for each shot type (min, max) — realistic values
+_SHOT_SPIN = {
+    "slow_rally":     (50, 150),       # light topspin
+    "medium_rally":   (200, 400),      # intermediate topspin
+    "fast_topspin":   (400, 700),      # heavy topspin
+    "smash":          (50, 150),       # flat hit, minimal spin
+    "backspin_chop":  (-500, -150),    # backspin (negative = backspin)
+}
+
 
 class AIPlayer:
     """An AI table tennis player that generates return shots."""
@@ -82,15 +107,10 @@ class AIPlayer:
 
     def can_reach(self, ball_pos: Vec3, ball_vel: Vec3) -> bool:
         """Whether the player can reach the incoming ball."""
-        # Faster ball is harder to reach
         speed = ball_vel.magnitude()
-        difficulty = min(1.0, speed / 35.0)  # 35 m/s is near max TT speed
+        difficulty = min(1.0, speed / 35.0)
         reach_prob = self.speed * (1.0 - difficulty * 0.5)
-        # Ball far from center is harder
-        if self.side == 1:
-            off_center = abs(ball_pos.y) / (table.TABLE_WIDTH / 2)
-        else:
-            off_center = abs(ball_pos.y) / (table.TABLE_WIDTH / 2)
+        off_center = abs(ball_pos.y) / (table.TABLE_WIDTH / 2)
         reach_prob -= off_center * 0.15
         reach_prob = max(0.1, min(0.99, reach_prob))
         return random.random() < reach_prob
@@ -98,6 +118,7 @@ class AIPlayer:
     def calculate_return(self, incoming_bounce: BounceEvent) -> BallState:
         """Calculate a return shot from an incoming bounce on this player's side.
 
+        Uses analytical trajectory calculation to ensure net clearance.
         Returns a BallState ready for physics.simulate().
         """
         my_half = -1 if self.side == 1 else 1
@@ -106,43 +127,14 @@ class AIPlayer:
         # Pick shot type based on playstyle + randomness
         shot_type = random.choice(self.preferred_shots)
 
-        # Base velocities scaled by power
-        speed_map = {
-            "slow_rally": (8, 0.5),
-            "medium_rally": (13, 1.0),
-            "fast_topspin": (20, 1.5),
-            "smash": (26, 3.5),
-            "backspin_chop": (9, 0.8),
-        }
-        base_vx, base_vz_down = speed_map.get(shot_type, (12, 1.0))
+        base_vx, _ = _SHOT_PARAMS.get(shot_type, (12, 1.0))
 
         # Scale by power with randomness
         power_noise = random.gauss(1.0, 0.08)
         vx = base_vx * self.power * power_noise * target_dir
 
-        # Vertical: slight downward angle, adjusted by power
-        vz = -base_vz_down * random.uniform(0.7, 1.3)
-
-        # Lateral aim: slightly random
-        vy = random.gauss(0, 0.3 + (1 - self.consistency) * 1.0)
-
-        # Spin based on shot type and ability
-        spin_x = 0.0
-        spin_y = 0.0
-        if shot_type in ("medium_rally", "fast_topspin"):
-            spin_y = random.uniform(15, 55) * self.spin_ability * target_dir
-        elif shot_type == "backspin_chop":
-            spin_y = -random.uniform(10, 30) * self.spin_ability * target_dir
-        elif shot_type == "smash":
-            spin_y = random.uniform(5, 20) * self.spin_ability * target_dir
-
-        # Sidespin sometimes
-        if random.random() < 0.15:
-            spin_x = random.gauss(0, 10) * self.spin_ability
-
         # Start position: near the bounce point, slightly behind
         start_x = incoming_bounce.pos.x + my_half * random.uniform(0.1, 0.3)
-        # Clamp to player's side
         if self.side == 1:
             start_x = min(start_x, -0.2)
         else:
@@ -151,12 +143,43 @@ class AIPlayer:
         start_y = incoming_bounce.pos.y + random.gauss(0, 0.05)
         start_z = table.TABLE_HEIGHT + random.uniform(0.25, 0.50)
 
+        # Calculate vz to land on opponent's side (analytical, ignoring drag/Magnus)
+        half_table = table.TABLE_LENGTH / 2
+        target_x = target_dir * random.uniform(0.3, half_table - 0.1)
+        dx = abs(target_x - start_x)
+        t_land = dx / max(abs(vx), 1.0)
+        target_land_z = table.TABLE_HEIGHT + table.BALL_RADIUS
+        vz = (target_land_z - start_z + 0.5 * table.GRAVITY * t_land ** 2) / t_land
+
+        # Ensure net clearance (ball must pass above net at x=0)
+        net_top = table.TABLE_HEIGHT + table.NET_HEIGHT
+        dist_to_net = abs(start_x)
+        if dist_to_net > 0.05:
+            t_net = dist_to_net / max(abs(vx), 1.0)
+            z_at_net = start_z + vz * t_net - 0.5 * table.GRAVITY * t_net ** 2
+            net_margin = 0.05  # 5cm safety margin
+            if z_at_net < net_top + net_margin:
+                vz_min = (net_top + net_margin - start_z + 0.5 * table.GRAVITY * t_net ** 2) / t_net
+                vz = max(vz, vz_min)
+
+        # Lateral aim: slightly random
+        vy = random.gauss(0, 0.3 + (1 - self.consistency) * 1.0)
+
+        # Spin in real rad/s, based on shot type and ability
+        spin_min, spin_max = _SHOT_SPIN.get(shot_type, (100, 300))
+        base_spin = random.uniform(spin_min, spin_max)
+        spin_y = base_spin * self.spin_ability * (1 if target_dir > 0 else -1)
+
+        # Sidespin occasionally
+        spin_x = 0.0
+        if random.random() < 0.15:
+            spin_x = random.gauss(0, 100) * self.spin_ability
+
         # Consistency check: bad shots go off-target
         if random.random() > self.consistency:
-            # Mis-hit: add error to velocity
             vx *= random.uniform(0.7, 1.4)
             vy += random.gauss(0, 1.5)
-            vz += random.gauss(0, 1.0)
+            vz += random.gauss(0, 0.5)
 
         return BallState(
             pos=Vec3(start_x, start_y, start_z),
@@ -165,7 +188,14 @@ class AIPlayer:
         )
 
     def generate_serve(self) -> BallState:
-        """Generate a serve from this player's side."""
+        """Generate a serve from this player's side.
+
+        Uses analytical trajectory to ensure the ball bounces on server's half
+        and clears the net. Serve speed is moderate (real serves rely on spin).
+
+        ITTF rules:
+        - Ball must bounce on server's side first, then cross net to receiver's side
+        """
         my_half = -1 if self.side == 1 else 1
         target_dir = -my_half
 
@@ -174,22 +204,36 @@ class AIPlayer:
         start_y = random.gauss(0, 0.15)
         start_z = table.TABLE_HEIGHT + random.uniform(0.30, 0.50)
 
-        # Serve speed: moderate, with variety
-        base_speed = random.uniform(7, 14) * (0.7 + self.power * 0.3)
+        # Serve speed: 3.8-5.2 m/s (realistic: serves rely on spin, not raw speed)
+        base_speed = random.uniform(3.8, 5.2) * (0.9 + self.power * 0.1)
         vx = base_speed * target_dir
-        vz = random.uniform(-1.5, -0.3)
-        vy = random.gauss(0, 0.4)
 
-        # Serve spin
-        spin_y = random.uniform(5, 35) * self.spin_ability * target_dir
+        # Target bounce: 40-65% from server's end line toward net
+        # (not too close to net — ball needs room to arc over it)
+        half_table = table.TABLE_LENGTH / 2
+        bounce_frac = random.uniform(0.40, 0.65)
+        bounce_x = my_half * (half_table - bounce_frac * half_table)
+
+        # Calculate vz analytically to land at bounce_x
+        dx = abs(bounce_x - start_x)
+        t_bounce = dx / max(abs(vx), 1.0)
+        target_z = table.TABLE_HEIGHT + table.BALL_RADIUS
+        vz = (target_z - start_z + 0.5 * table.GRAVITY * t_bounce ** 2) / t_bounce
+
+        # Small noise for variety
+        vz += random.gauss(0, 0.15)
+        vy = random.gauss(0, 0.3)
+
+        # Serve spin (real values: ~195 rad/s average for pros)
+        spin_y = random.uniform(100, 250) * self.spin_ability * target_dir
         if random.random() < 0.3:  # Sometimes backspin serve
             spin_y = -spin_y * 0.5
-        spin_x = random.gauss(0, 5) * self.spin_ability
+        spin_x = random.gauss(0, 60) * self.spin_ability
 
-        # Serve consistency
+        # Serve consistency — occasional bad serve
         if random.random() > self.consistency * 1.1:
-            vz += random.gauss(0, 0.8)
-            vy += random.gauss(0, 0.8)
+            vz += random.gauss(0, 0.5)
+            vy += random.gauss(0, 0.6)
 
         return BallState(
             pos=Vec3(start_x, start_y, start_z),

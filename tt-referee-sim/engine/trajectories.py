@@ -1,4 +1,13 @@
-"""Preset shot trajectories for the simulation."""
+"""Preset shot trajectories for the simulation.
+
+All spin values are in rad/s (real professional values):
+  - Beginner topspin:  ~188 rad/s (30 rps / 1800 RPM)
+  - Intermediate loop: ~377 rad/s (60 rps / 3600 RPM)
+  - Pro topspin loop:  ~628 rad/s (100 rps / 6000 RPM)
+  - Elite (Ma Long):   ~880 rad/s (140 rps / 8400 RPM)
+  - Backspin chop:     ~377 rad/s (60 rps / 3600 RPM)
+  - Serve spin:        ~195 rad/s (31 rps / 1860 RPM)
+"""
 
 from engine.types import BallState, Vec3
 from engine import table
@@ -9,28 +18,28 @@ _START_Z = table.TABLE_HEIGHT + 0.40  # ~40cm above table, realistic for waist-h
 
 SHOT_PRESETS = {
     "slow_rally": {
-        "label": "Slow Rally (~30 km/h)",
+        "label": "Slow Push (~30 km/h)",
         "speed": 30,
         "vx": 8.3,
         "vy": 0.2,
         "vz": -0.5,
-        "spin": (0, 5, 0),
+        "spin": (0, 100, 0),  # light topspin ~16 rps
     },
     "medium_rally": {
-        "label": "Medium Rally (~50 km/h)",
+        "label": "Medium Topspin Rally (~50 km/h)",
         "speed": 50,
         "vx": 13.5,
         "vy": 0.3,
-        "vz": -1.0,
-        "spin": (0, 30, 0),  # topspin around y-axis dips the ball
+        "vz": -0.8,
+        "spin": (0, 300, 0),  # intermediate topspin ~48 rps
     },
     "fast_topspin": {
-        "label": "Fast Topspin (~80 km/h)",
+        "label": "Fast Topspin Loop (~80 km/h)",
         "speed": 80,
         "vx": 21,
         "vy": 0.4,
-        "vz": -1.5,
-        "spin": (0, 55, 0),  # heavy topspin — strong downward dip
+        "vz": -2.0,
+        "spin": (0, 600, 0),  # pro-level topspin ~96 rps — Magnus adds ~2x gravity dip
     },
     "smash": {
         "label": "Smash (~100 km/h)",
@@ -38,7 +47,7 @@ SHOT_PRESETS = {
         "vx": 27,
         "vy": 0.2,
         "vz": -3.5,
-        "spin": (0, 20, 0),
+        "spin": (0, 100, 0),  # flat hit, minimal spin
     },
     "net_clip": {
         "label": "Net Clip",
@@ -46,23 +55,23 @@ SHOT_PRESETS = {
         "vx": 9.5,
         "vy": 0.1,
         "vz": -0.7,
-        "spin": (0, 5, 0),  # barely clears net
+        "spin": (0, 80, 0),  # barely clears net
     },
     "edge_hit": {
-        "label": "Edge Hit",
+        "label": "Edge Hit (sidespin)",
         "speed": 45,
         "vx": 12,
         "vy": 2.0,
         "vz": -0.8,
-        "spin": (15, 10, 0),  # sidespin + topspin
+        "spin": (200, 150, 0),  # heavy sidespin + topspin
     },
     "backspin_chop": {
         "label": "Backspin Chop",
         "speed": 36,
-        "vx": 10,
+        "vx": 8,
         "vy": 0.2,
         "vz": -0.8,
-        "spin": (0, -10, 0),  # backspin lifts slightly, floats longer
+        "spin": (0, -350, 0),  # heavy backspin ~56 rps — backspin LIFTS ball, so flat trajectory
     },
 }
 

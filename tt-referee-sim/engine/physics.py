@@ -1,6 +1,11 @@
-"""Ball physics simulation — gravity, drag, Magnus effect, bounces, net collision."""
+"""Ball physics simulation — gravity, drag, Magnus effect, bounces, net collision.
+
+Uses real spin values in rad/s (pro topspin: ~628 rad/s = 100 rps).
+Magnus effect calibrated so heavy topspin produces ~2x gravity of downward force.
+"""
 
 import math
+import random
 from typing import Union
 
 from engine.types import BallState, BounceEvent, NetEvent, OutEvent, Vec3
@@ -28,10 +33,12 @@ def _apply_drag(vel: Vec3, dt: float) -> Vec3:
 
 
 def _apply_magnus(vel: Vec3, spin: Vec3, dt: float) -> Vec3:
-    """Magnus effect: F = (4/3) * pi * r^3 * rho * Cl * (spin x velocity).
+    """Magnus effect: F = (4/3) * pi * r^3 * rho * Cl * (spin x velocity) * BOOST.
 
-    Uses physically correct formula scaled by ball volume and air density,
-    which keeps forces realistic for a 40mm, 2.7g ping pong ball.
+    With real spin values (100-900 rad/s), MAGNUS_BOOST=0.20 gives:
+    - Pro topspin (628 rad/s, 21 m/s): ~20 m/s^2 downward = ~2x gravity
+    - Medium rally (300 rad/s, 13 m/s): ~6 m/s^2 = ~0.6x gravity
+    - Light topspin (100 rad/s, 8 m/s): ~1 m/s^2 = subtle effect
     """
     if spin.magnitude() < 1e-9:
         return vel.copy()
@@ -39,7 +46,7 @@ def _apply_magnus(vel: Vec3, spin: Vec3, dt: float) -> Vec3:
     cross_mag = cross.magnitude()
     if cross_mag < 1e-9:
         return vel.copy()
-    # Force magnitude: (4/3) * pi * r^3 * rho * Cl * |omega x v|
+    # Force magnitude: (4/3) * pi * r^3 * rho * Cl * |omega x v| * BOOST
     volume_factor = (4.0 / 3.0) * math.pi * table.BALL_RADIUS**3
     force = volume_factor * table.AIR_DENSITY * table.MAGNUS_CL * cross_mag * table.MAGNUS_BOOST
     accel = force / table.BALL_MASS
@@ -64,22 +71,35 @@ def _check_table_bounce(
             curr.pos.z = bounce_z
             curr.vel.z = -curr.vel.z * table.RESTITUTION
 
-            # Spin modifies bounce
-            # Topspin (positive spin.x) adds forward speed
-            spin_effect = curr.spin.x * 0.002
-            curr.vel.x += spin_effect
-            # Backspin reduces forward speed
-            # (handled by negative spin.x)
+            # Spin-bounce interaction (physically correct for BOTH directions)
+            # Contact point velocity = -spin.y * R (from cross product of spin × r_contact)
+            # Friction force on ball = FRICTION * spin.y * R (always correct sign)
+            # Topspin (+x travel, spin.y>0 OR -x travel, spin.y<0) accelerates forward
+            # Backspin (opposite signs) decelerates
+            spin_velocity = curr.spin.y * table.BALL_RADIUS
+            curr.vel.x += table.BALL_TABLE_FRICTION * spin_velocity
 
-            # Friction on bounce
+            # Sidespin (spin.x) deflects laterally on bounce
+            side_spin_vel = curr.spin.x * table.BALL_RADIUS
+            curr.vel.y += table.BALL_TABLE_FRICTION * side_spin_vel * 0.5
+
+            # Topspin reduces bounce height, backspin increases it
+            # Topspin = spin.y and vel.x have same sign (forward spin)
+            # Backspin = spin.y and vel.x have opposite signs
+            if curr.spin.y * curr.vel.x > 0:
+                curr.vel.z *= 0.92  # topspin: lower, faster bounce
+            elif curr.spin.y * curr.vel.x < 0:
+                curr.vel.z *= 1.08  # backspin: higher, slower bounce
+
+            # General friction on bounce
             curr.vel.x *= 0.95
             curr.vel.y *= 0.95
 
-            # Reduce spin on bounce
+            # Spin decays on bounce (~22% loss per research)
             curr.spin = Vec3(
-                curr.spin.x * 0.7,
-                curr.spin.y * 0.7,
-                curr.spin.z * 0.7,
+                curr.spin.x * table.SPIN_DECAY_ON_BOUNCE,
+                curr.spin.y * table.SPIN_DECAY_ON_BOUNCE,
+                curr.spin.z * table.SPIN_DECAY_ON_BOUNCE,
             )
 
             side = "left" if curr.pos.x < 0 else "right"
@@ -95,26 +115,49 @@ def _check_table_bounce(
 def _check_net_collision(
     prev: BallState, curr: BallState
 ) -> tuple[BallState, list[NetEvent]]:
-    """Check and handle ball hitting the net."""
+    """Check and handle ball hitting the net.
+
+    Two zones:
+    - Net top clip (within ball radius of net top): ball may dribble over or fall back
+    - Net body hit (below net top): ball stops, falls on hitter's side
+    """
     events: list[NetEvent] = []
     half_w = table.TABLE_WIDTH / 2 + table.NET_OVERHANG
-    net_top = table.TABLE_HEIGHT + table.NET_HEIGHT + table.BALL_RADIUS
+    net_top = table.TABLE_HEIGHT + table.NET_HEIGHT
+    clip_zone_top = net_top + table.BALL_RADIUS
+    clip_zone_bottom = net_top - table.BALL_RADIUS
 
-    # Detect crossing in either direction (left→right or right→left)
+    # Detect crossing in either direction (left->right or right->left)
     crossed = (prev.pos.x < 0 and curr.pos.x >= 0) or (prev.pos.x > 0 and curr.pos.x <= 0)
     if not crossed:
         return curr, events
 
-    if abs(curr.pos.y) <= half_w:
-        if table.TABLE_HEIGHT + table.BALL_RADIUS <= curr.pos.z < net_top:
-            # Ball clips top of net
-            curr.vel.x *= 0.3
-            curr.vel.z = abs(curr.vel.z) * 0.4
+    if abs(curr.pos.y) > half_w:
+        return curr, events  # Ball goes around the net (legal in real TT!)
+
+    # Ball height at net crossing
+    if curr.pos.z < clip_zone_top:
+        if curr.pos.z >= clip_zone_bottom:
+            # NET CLIP — ball grazes the top of the net
+            # Unpredictable: sometimes dribbles over, sometimes falls back
+            if random.random() < 0.6:
+                # Ball dribbles over the net (lucky net cord)
+                curr.vel.x *= 0.10  # almost all horizontal speed lost
+                curr.vel.z = random.uniform(0.1, 0.4)  # small upward pop
+                curr.vel.y *= 0.3
+            else:
+                # Ball falls back on hitter's side
+                curr.vel.x = -curr.vel.x * 0.05  # tiny reverse
+                curr.vel.z = random.uniform(0.05, 0.2)
             events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=True))
-        elif curr.pos.z < table.TABLE_HEIGHT + table.BALL_RADIUS:
-            # Ball hits net body — reflect with heavy loss
-            curr.vel.x = -curr.vel.x * 0.15
-            curr.vel.z = abs(curr.vel.z) * 0.2
+        else:
+            # NET BODY HIT — ball hits the mesh, stops dead
+            # Ball falls on hitter's side — point to opponent
+            curr.vel.x = 0.0
+            curr.vel.y = 0.0
+            curr.vel.z = 0.05  # tiny upward so it falls naturally
+            curr.pos.x = prev.pos.x  # snap back to hitter's side
+            curr.alive = False  # ball is dead
             events.append(NetEvent(pos=curr.pos.copy(), t=curr.t, clipped=False))
 
     return curr, events
